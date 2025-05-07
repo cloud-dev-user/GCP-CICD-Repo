@@ -1,0 +1,57 @@
+substitutions:
+  _SERVICE_NAME: sample-app
+  _REGION: us-central1
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/$_SERVICE_NAME:$SHORT_SHA', '.']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/$_SERVICE_NAME:$SHORT_SHA']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: deploy-new
+    args: [
+      'run', 'deploy', '$_SERVICE_NAME',
+      '--image', 'gcr.io/$PROJECT_ID/$_SERVICE_NAME:$SHORT_SHA',
+      '--region', '$_REGION',
+      '--no-traffic',
+      '--platform', 'managed'
+    ]
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: get-revision
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        gcloud run revisions list --service=$_SERVICE_NAME --region=$_REGION         --format="value(METADATA.name)" --sort-by="~createTime" | head -n1 > new_revision.txt
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: shift-traffic
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        REVISION=$(cat new_revision.txt)
+        gcloud run services update-traffic $_SERVICE_NAME           --to-revisions=$REVISION=100           --region=$_REGION
+
+  - name: 'alpine'
+    entrypoint: sleep
+    args: ['10']
+
+  - name: 'gcr.io/cloud-builders/curl'
+    entrypoint: bash
+    args: ['./scripts/health-check.sh', 'https://$_SERVICE_NAME-$_REGION.a.run.app']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: rollback
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [[ $? -ne 0 ]]; then
+          echo "Health check failed. Rolling back..."
+          PREV_REV=$(gcloud run revisions list --service=$_SERVICE_NAME --region=$_REGION                     --format="value(METADATA.name)" --sort-by="~createTime" | sed -n 2p)
+          gcloud run services update-traffic $_SERVICE_NAME             --to-revisions=$PREV_REV=100             --region=$_REGION
+        fi

@@ -1,0 +1,13 @@
+{
+  "name": "deploy-on-commit",
+  "description": "Trigger on code push",
+  "triggerTemplate": {
+    "repoName": "sample-repo",
+    "branchName": "main"
+  },
+  "filename": "cloudbuild.yaml",
+  "substitutions": {
+    "_SERVICE_NAME": "basic-app",
+    "_REGION": "us-central1"
+  }
+}
